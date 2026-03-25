@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import { BloodTestRecord } from '../types';
+import { generateInterpretation } from './bloodTestUtils';
 import { format } from 'date-fns';
 
 const loadImage = (url: string): Promise<HTMLImageElement> => {
@@ -85,11 +86,6 @@ export const generatePDF = async (record: BloodTestRecord) => {
   doc.setFont('helvetica', 'normal');
   doc.text(record.gender || '', margin + 35, yPos);
 
-  doc.setFont('helvetica', 'bold');
-  doc.text('Zona:', margin + 45, yPos);
-  doc.setFont('helvetica', 'normal');
-  doc.text(record.zone || '', margin + 55, yPos);
-
   yPos += 3;
   doc.line(margin, yPos, pageWidth - margin, yPos);
 
@@ -152,21 +148,34 @@ export const generatePDF = async (record: BloodTestRecord) => {
   // Interpretation
   yPos += 6;
   doc.setFont('helvetica', 'normal');
-  const patientGroup = `${record.bloodGroup || ''} Rh${record.rh || ''}`;
-  const unitGroup = `${record.unitGroup || ''} Rh${record.unitRh || ''}`;
-  let predefinedText = '';
-  if (record.result === 'Compatible') {
-    predefinedText = `Se realizó prueba cruzada mayor manual entre el paciente ${record.patientName || '[Nombre]'} (Grupo ${patientGroup}) y la unidad ${record.unitId || '[Número]'} (Grupo ${unitGroup}). Tras las fases salina, albúmina y antiglobulina, no se observó aglutinación ni hemólisis. Resultado: Compatible para transfusión.`;
-  } else {
-    predefinedText = `Se realizó prueba cruzada mayor manual entre el paciente ${record.patientName || '[Nombre]'} (Grupo ${patientGroup}) y la unidad ${record.unitId || '[Número]'} (Grupo ${unitGroup}). Tras las fases salina, albúmina y antiglobulina, se observó aglutinación y/o hemólisis. Resultado: Incompatible para transfusión.`;
-  }
+  const predefinedText = generateInterpretation(record);
 
   const splitPredefined = doc.splitTextToSize(predefinedText, pageWidth - col1 - margin);
   doc.text(splitPredefined, col1, yPos);
   yPos += (splitPredefined.length * 4) + 2;
 
+  // SIHEVI Section in PDF
+  if (record.siheviReport === 'Sí' || record.siheviPredefinedText) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('INFORMACIÓN SIHEVI:', col1, yPos);
+    yPos += 4;
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Reporte SIHEVI: ${record.siheviReport || 'No'}`, col1, yPos);
+    if (record.siheviDescription) {
+      doc.text(` - ${record.siheviDescription}`, col1 + 40, yPos);
+    }
+    yPos += 4;
+    if (record.siheviPredefinedText) {
+      const siheviText = `Comentario: ${record.siheviPredefinedText}`;
+      const splitSihevi = doc.splitTextToSize(siheviText, pageWidth - col1 - margin);
+      doc.text(splitSihevi, col1, yPos);
+      yPos += (splitSihevi.length * 4);
+    }
+    yPos += 2;
+  }
+
   // Signature
-  yPos += 15;
+  yPos += 10;
   let signatureHeight = 15;
   try {
     const firmaImg = await loadImage('/firma.png');
@@ -302,12 +311,13 @@ export const generateTraceabilityPDF = async (data: any) => {
     doc.text(`Paciente: ${record.patientName || 'N/A'} (ID: ${record.patientId || 'N/A'})`, margin + 10, yPos);
     yPos += 5;
     doc.text(`Grupo Paciente: ${record.bloodGroup || ''}${record.rh || ''}`, margin + 10, yPos);
-    doc.text(`Resultado: ${record.result || 'N/A'}`, margin + 80, yPos);
+    doc.text(`Tipo Solicitud: ${record.requestType || 'N/A'}`, margin + 80, yPos);
     yPos += 5;
-    doc.text(`Anticuerpos: ${record.irregularAntibodies || 'N/A'}`, margin + 10, yPos);
-    doc.text(`Autocontrol: ${record.autocontrol || 'N/A'}`, margin + 80, yPos);
+    doc.text(`Resultado: ${record.result || 'N/A'}`, margin + 10, yPos);
+    doc.text(`Anticuerpos: ${record.irregularAntibodies || 'N/A'}`, margin + 80, yPos);
     yPos += 5;
-    doc.text(`Responsable: ${record.bacteriologist || record.responsiblePerson || 'N/A'}`, margin + 10, yPos);
+    doc.text(`Autocontrol: ${record.autocontrol || 'N/A'}`, margin + 10, yPos);
+    doc.text(`Responsable: ${record.bacteriologist || record.responsiblePerson || 'N/A'}`, margin + 80, yPos);
     yPos += 5;
     doc.text(`Registrado por: ${record.userEmail || 'N/A'}`, margin + 10, yPos);
   });
@@ -319,11 +329,8 @@ export const generateTraceabilityPDF = async (data: any) => {
     doc.text(`Servicio: ${record.service || 'N/A'}`, margin + 10, yPos);
     doc.text(`Fecha Transfusión: ${record.transfusionDate || 'N/A'} ${record.transfusionTime || ''}`, margin + 80, yPos);
     yPos += 5;
-    doc.text(`Médico Responsable: ${record.responsibleDoctor || 'N/A'}`, margin + 10, yPos);
-    yPos += 5;
-    doc.text(`Enfermero(a) Responsable: ${record.responsibleNurse || 'N/A'}`, margin + 10, yPos);
-    yPos += 5;
     doc.text(`Reacción Adversa: ${record.adverseReaction || 'No'}`, margin + 10, yPos);
+    doc.text(`Oportunidad: ${record.opportunity || 'N/A'}`, margin + 80, yPos);
     if (record.adverseReaction === 'Sí') {
       yPos += 5;
       doc.text(`Descripción Reacción: ${record.reactionDescription || 'N/A'}`, margin + 10, yPos);

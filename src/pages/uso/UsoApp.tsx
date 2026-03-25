@@ -1,20 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Activity, History, LogIn, LogOut, ShieldCheck, Trash2 } from 'lucide-react';
+import { ArrowLeft, Activity, History, LogIn, LogOut, ShieldCheck, Trash2, Plus } from 'lucide-react';
 import { UsoForm } from '../../components/UsoForm';
+import { UsoRecordCard } from '../../components/UsoRecordCard';
 import { TransfusionUseRecord } from '../../types';
 import { auth, db, loginWithGoogle, logout, handleFirestoreError, OperationType } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, where, getDocs, updateDoc } from 'firebase/firestore';
 
 export const UsoApp: React.FC = () => {
   const navigate = useNavigate();
   const [records, setRecords] = useState<TransfusionUseRecord[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<TransfusionUseRecord | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   
   const [isSystemUnlocked, setIsSystemUnlocked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -98,9 +101,13 @@ export const UsoApp: React.FC = () => {
     const normalizedUsername = username.trim().toLowerCase();
     if (
       (normalizedUsername === 'usohemo' && password === 'Usohemo2026*') ||
-      (normalizedUsername === 'admin' && password === 'admin')
+      (normalizedUsername === 'admin' && password === 'admin') ||
+      (user?.email === 'ingbiomedico@ucihonda.com.co')
     ) {
       setIsSystemUnlocked(true);
+      if (normalizedUsername === 'admin' || user?.email === 'ingbiomedico@ucihonda.com.co') {
+        setIsAdmin(true);
+      }
     } else {
       setLoginError('Usuario o contraseña incorrectos.');
     }
@@ -139,26 +146,36 @@ export const UsoApp: React.FC = () => {
     if (!user) return;
     setIsSyncing(true);
     try {
-      const fullRecord = {
-        ...formData,
-        createdAt: new Date().toISOString(),
-        uid: user.uid,
-        userEmail: user.email || 'Desconocido'
-      };
+      if (editingRecord?.id) {
+        const updateData = {
+          ...formData,
+          updatedAt: new Date().toISOString(),
+          updatedBy: user.email || 'Desconocido'
+        };
+        await updateDoc(doc(db, 'transfusionUse', editingRecord.id), updateData);
+        setEditingRecord(null);
+      } else {
+        const fullRecord = {
+          ...formData,
+          createdAt: new Date().toISOString(),
+          uid: user.uid,
+          userEmail: user.email || 'Desconocido'
+        };
 
-      await addDoc(collection(db, 'transfusionUse'), fullRecord);
-      
-      if (isGoogleConnected) {
-        await fetch('/api/sync/sheets/uso', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(fullRecord),
-        });
+        await addDoc(collection(db, 'transfusionUse'), fullRecord);
+        
+        if (isGoogleConnected) {
+          await fetch('/api/sync/sheets/uso', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fullRecord),
+          });
+        }
       }
       
       setShowForm(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'transfusionUse');
+      handleFirestoreError(error, editingRecord ? OperationType.UPDATE : OperationType.CREATE, 'transfusionUse');
     } finally {
       setIsSyncing(false);
     }
@@ -172,6 +189,16 @@ export const UsoApp: React.FC = () => {
         handleFirestoreError(error, OperationType.DELETE, `transfusionUse/${id}`);
       }
     }
+  };
+
+  const handleEdit = (record: TransfusionUseRecord) => {
+    setEditingRecord(record);
+    setShowForm(true);
+  };
+
+  const handleNewRecord = () => {
+    setEditingRecord(null);
+    setShowForm(true);
   };
 
   if (!isAuthReady) return <div className="min-h-screen bg-zinc-50 flex items-center justify-center"><div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" /></div>;
@@ -200,11 +227,11 @@ export const UsoApp: React.FC = () => {
                     onClick={isGoogleConnected ? handleDisconnectGoogle : handleConnectGoogle}
                     className="ml-2 text-xs text-blue-600 hover:underline"
                   >
-                    {isGoogleConnected ? 'Conectar' : 'Desconectar'}
+                    {isGoogleConnected ? 'Desconectar' : 'Conectar'}
                   </button>
                 </div>
-                <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-all shadow-md shadow-emerald-100">
-                {showForm ? <History size={18} /> : <Activity size={18} />}
+                <button onClick={showForm ? () => setShowForm(false) : handleNewRecord} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-all shadow-md shadow-emerald-100">
+                {showForm ? <History size={18} /> : <Plus size={18} />}
                 {showForm ? 'Ver Historial' : 'Nuevo Registro'}
               </button>
               </>
@@ -240,41 +267,26 @@ export const UsoApp: React.FC = () => {
         ) : (
           <>
             {showForm ? (
-              <div className="max-w-4xl mx-auto"><UsoForm onSubmit={handleSubmit} isSubmitting={isSyncing} /></div>
+              <div className="max-w-4xl mx-auto">
+                <UsoForm 
+                  onSubmit={handleSubmit} 
+                  isSubmitting={isSyncing} 
+                  initialData={editingRecord || undefined} 
+                />
+              </div>
             ) : (
               <div className="space-y-6">
                 <h2 className="text-2xl font-bold text-zinc-900">Historial de Uso</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {records.map((record) => (
-                    <div key={record.id} className="bg-white p-6 rounded-3xl shadow-sm border border-zinc-100 space-y-4 relative group">
-                      {user?.uid === record.uid && (
-                        <button
-                          onClick={() => record.id && handleDelete(record.id)}
-                          className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-xl opacity-0 group-hover:opacity-100 transition-all"
-                          title="Eliminar registro"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      )}
-                      <div className="flex justify-between items-start pr-10">
-                        <div className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">Unidad: {record.unitId}</div>
-                        <span className="text-xs text-zinc-400">{new Date(record.createdAt).toLocaleString()}</span>
-                      </div>
-                      <div className="bg-zinc-50 px-3 py-1 rounded-full text-xs font-medium text-zinc-600 inline-block">
-                        Sello: {record.qualitySeal}
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-zinc-900">{record.patientName}</h3>
-                        <p className="text-xs text-zinc-500">ID: {record.patientId}</p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="bg-zinc-50 p-2 rounded-lg"><p className="text-zinc-400 font-medium">Fecha</p><p className="font-bold">{record.transfusionDate}</p></div>
-                        <div className="bg-zinc-50 p-2 rounded-lg"><p className="text-zinc-400 font-medium">Hora</p><p className="font-bold">{record.transfusionTime || '--:--'}</p></div>
-                      </div>
-                      {record.adverseReaction === 'Sí' && (
-                        <div className="bg-red-50 p-3 rounded-xl border border-red-100"><p className="text-xs font-bold text-red-600">REACCIÓN ADVERSA</p><p className="text-xs text-red-500 mt-1">{record.reactionDescription}</p></div>
-                      )}
-                    </div>
+                    <UsoRecordCard
+                      key={record.id}
+                      record={record}
+                      onDelete={handleDelete}
+                      onEdit={handleEdit}
+                      currentUserUid={user?.uid}
+                      isAdmin={isAdmin}
+                    />
                   ))}
                 </div>
               </div>

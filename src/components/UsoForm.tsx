@@ -7,37 +7,34 @@ import { collection, query, where, getDocs, limit, orderBy } from 'firebase/fire
 interface UsoFormProps {
   onSubmit: (record: Omit<TransfusionUseRecord, 'id' | 'createdAt' | 'uid' | 'userEmail'>) => Promise<void>;
   isSubmitting: boolean;
+  initialData?: TransfusionUseRecord;
 }
 
-export const UsoForm: React.FC<UsoFormProps> = ({ onSubmit, isSubmitting }) => {
+export const UsoForm: React.FC<UsoFormProps> = ({ onSubmit, isSubmitting, initialData }) => {
   const [formData, setFormData] = useState<Omit<TransfusionUseRecord, 'id' | 'createdAt' | 'uid' | 'userEmail'>>({
-    service: '',
-    patientName: '',
-    patientId: '',
-    age: '',
-    gender: '',
-    hemoderivativeType: '',
-    bloodGroup: '',
-    rh: '',
-    orderDate: new Date().toISOString().split('T')[0],
-    orderTime: '',
-    transfusionDate: new Date().toISOString().split('T')[0],
-    transfusionTime: '',
-    opportunity: '',
-    qualitySeal: '',
-    unitId: '',
-    prescriptionFormat: '',
-    informedConsent: '',
-    adminChecklist: '',
-    adverseReaction: '',
-    safetyEvent: '',
-    preVitalSigns: { ta: '', fc: '', fr: '', temp: '' },
-    duringVitalSigns: { ta: '', fc: '', fr: '', temp: '' },
-    postVitalSigns: { ta: '', fc: '', fr: '', temp: '' },
-    reactionDescription: '',
-    responsibleDoctor: '',
-    responsibleNurse: '',
-    observations: '',
+    service: initialData?.service || '',
+    patientName: initialData?.patientName || '',
+    patientId: initialData?.patientId || '',
+    age: initialData?.age || '',
+    gender: initialData?.gender || '',
+    hemoderivativeType: initialData?.hemoderivativeType || '',
+    bloodGroup: initialData?.bloodGroup || '',
+    rh: initialData?.rh || '',
+    orderDate: initialData?.orderDate || new Date().toISOString().split('T')[0],
+    orderTime: initialData?.orderTime || '',
+    transfusionDate: initialData?.transfusionDate || new Date().toISOString().split('T')[0],
+    transfusionTime: initialData?.transfusionTime || '',
+    opportunity: initialData?.opportunity || '',
+    qualitySeal: initialData?.qualitySeal || '',
+    unitId: initialData?.unitId || '',
+    prescriptionFormat: initialData?.prescriptionFormat || '',
+    informedConsent: initialData?.informedConsent || '',
+    adminChecklist: initialData?.adminChecklist || '',
+    nursingNote: initialData?.nursingNote || '',
+    adverseReaction: initialData?.adverseReaction || '',
+    safetyEvent: initialData?.safetyEvent || '',
+    reactionDescription: initialData?.reactionDescription || '',
+    observations: initialData?.observations || '',
   });
 
   const [error, setError] = useState('');
@@ -209,8 +206,8 @@ export const UsoForm: React.FC<UsoFormProps> = ({ onSubmit, isSubmitting }) => {
       <div className="flex items-center gap-3 pb-4 border-b border-zinc-100">
         <div className="bg-emerald-100 p-2 rounded-lg"><Activity className="text-emerald-600" size={24} /></div>
         <div>
-          <h2 className="text-2xl font-bold text-zinc-900">Registro de Uso (Transfusión)</h2>
-          <p className="text-sm text-zinc-500">Diligencie la información del acto transfusional</p>
+          <h2 className="text-2xl font-bold text-zinc-900">{initialData ? 'Editar Registro de Uso' : 'Registro de Uso (Transfusión)'}</h2>
+          <p className="text-sm text-zinc-500">{initialData ? 'Modifique la información del acto transfusional' : 'Diligencie la información del acto transfusional'}</p>
         </div>
       </div>
 
@@ -227,7 +224,8 @@ export const UsoForm: React.FC<UsoFormProps> = ({ onSubmit, isSubmitting }) => {
             <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Servicio donde se transfunde *</label>
             <select name="service" value={formData.service} onChange={handleChange} className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 outline-none" required>
               <option value="">Seleccione...</option>
-              <option value="UCI critico - intermedios">UCI critico - intermedios</option>
+              <option value="UCI Crítico">UCI Crítico</option>
+              <option value="UCI Intermedio">UCI Intermedio</option>
               <option value="Hospitalización">Hospitalización</option>
               <option value="Cirugía">Cirugía</option>
             </select>
@@ -350,6 +348,12 @@ export const UsoForm: React.FC<UsoFormProps> = ({ onSubmit, isSubmitting }) => {
               <option value="">...</option><option value="Sí">Sí</option><option value="No">No</option>
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">NOTA DE ENFERMERÍA</label>
+            <select name="nursingNote" value={formData.nursingNote} onChange={handleChange} className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 outline-none">
+              <option value="">...</option><option value="Sí">Sí</option><option value="No">No</option>
+            </select>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -369,32 +373,7 @@ export const UsoForm: React.FC<UsoFormProps> = ({ onSubmit, isSubmitting }) => {
         </div>
       </div>
 
-      <div className="space-y-6">
-        <h3 className="font-bold text-zinc-800 flex items-center gap-2 text-lg"><Thermometer className="text-emerald-500" size={20} /> Monitoreo de Signos Vitales</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {['pre', 'during', 'post'].map((phase) => (
-            <div key={phase} className="bg-zinc-50 p-4 rounded-2xl space-y-3">
-              <p className="text-xs font-bold text-zinc-400 uppercase">{phase}-Transfusión</p>
-              <div className="grid grid-cols-2 gap-2">
-                <input placeholder="TA" name={`${phase}VitalSigns.ta`} value={(formData as any)[`${phase}VitalSigns`]?.ta} onChange={handleChange} className="px-3 py-2 rounded-lg border border-zinc-200 text-sm" />
-                <input placeholder="FC" name={`${phase}VitalSigns.fc`} value={(formData as any)[`${phase}VitalSigns`]?.fc} onChange={handleChange} className="px-3 py-2 rounded-lg border border-zinc-200 text-sm" />
-                <input placeholder="FR" name={`${phase}VitalSigns.fr`} value={(formData as any)[`${phase}VitalSigns`]?.fr} onChange={handleChange} className="px-3 py-2 rounded-lg border border-zinc-200 text-sm" />
-                <input placeholder="T°" name={`${phase}VitalSigns.temp`} value={(formData as any)[`${phase}VitalSigns`]?.temp} onChange={handleChange} className="px-3 py-2 rounded-lg border border-zinc-200 text-sm" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Médico Responsable</label>
-          <input type="text" name="responsibleDoctor" value={formData.responsibleDoctor} onChange={handleChange} className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 outline-none" />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Enfermero Responsable</label>
-          <input type="text" name="responsibleNurse" value={formData.responsibleNurse} onChange={handleChange} className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 outline-none" />
-        </div>
         <div className="md:col-span-2">
           <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Observaciones Adicionales</label>
           <textarea name="observations" value={formData.observations} onChange={handleChange} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 outline-none h-24" />
@@ -403,7 +382,7 @@ export const UsoForm: React.FC<UsoFormProps> = ({ onSubmit, isSubmitting }) => {
 
       <button type="submit" disabled={isSubmitting} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3">
         {isSubmitting ? <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={24} />}
-        Guardar Registro de Uso
+        {initialData ? 'Actualizar Registro' : 'Guardar Registro de Uso'}
       </button>
 
       {/* Alerta de Novedad */}

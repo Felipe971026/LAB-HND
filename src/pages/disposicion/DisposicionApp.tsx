@@ -5,7 +5,7 @@ import { DisposicionForm } from '../../components/DisposicionForm';
 import { FinalDispositionRecord } from '../../types';
 import { auth, db, loginWithGoogle, handleFirestoreError, OperationType } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, where, getDocs, updateDoc } from 'firebase/firestore';
 
 export const DisposicionApp: React.FC = () => {
   const navigate = useNavigate();
@@ -15,8 +15,10 @@ export const DisposicionApp: React.FC = () => {
   const [isAuthReady, setIsAuthReady] = useState(false);
   
   const [isSystemUnlocked, setIsSystemUnlocked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<FinalDispositionRecord | null>(null);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -98,9 +100,13 @@ export const DisposicionApp: React.FC = () => {
     const normalizedUsername = username.trim().toLowerCase();
     if (
       (normalizedUsername === 'disposicionhemo' && password === 'Disposicionhemo2026*') ||
-      (normalizedUsername === 'admin' && password === 'admin')
+      (normalizedUsername === 'admin' && password === 'admin') ||
+      (user?.email === 'ingbiomedico@ucihonda.com.co')
     ) {
       setIsSystemUnlocked(true);
+      if (normalizedUsername === 'admin' || user?.email === 'ingbiomedico@ucihonda.com.co') {
+        setIsAdmin(true);
+      }
     } else {
       setLoginError('Usuario o contraseña incorrectos.');
     }
@@ -139,26 +145,36 @@ export const DisposicionApp: React.FC = () => {
     if (!user) return;
     setIsSyncing(true);
     try {
-      const fullRecord = {
-        ...formData,
-        createdAt: new Date().toISOString(),
-        uid: user.uid,
-        userEmail: user.email || 'Desconocido'
-      };
+      if (editingRecord) {
+        const updateData = {
+          ...formData,
+          updatedAt: new Date().toISOString(),
+          updatedBy: user.email || 'Desconocido'
+        };
+        await updateDoc(doc(db, 'finalDisposition', editingRecord.id!), updateData);
+        setEditingRecord(null);
+      } else {
+        const fullRecord = {
+          ...formData,
+          createdAt: new Date().toISOString(),
+          uid: user.uid,
+          userEmail: user.email || 'Desconocido'
+        };
 
-      await addDoc(collection(db, 'finalDisposition'), fullRecord);
-      
-      if (isGoogleConnected) {
-        await fetch('/api/sync/sheets/disposicion', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(fullRecord),
-        });
+        await addDoc(collection(db, 'finalDisposition'), fullRecord);
+        
+        if (isGoogleConnected) {
+          await fetch('/api/sync/sheets/disposicion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fullRecord),
+          });
+        }
       }
       
       setShowForm(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'finalDisposition');
+      handleFirestoreError(error, editingRecord ? OperationType.UPDATE : OperationType.CREATE, 'finalDisposition');
     } finally {
       setIsSyncing(false);
     }
@@ -172,6 +188,16 @@ export const DisposicionApp: React.FC = () => {
         handleFirestoreError(error, OperationType.DELETE, `finalDisposition/${id}`);
       }
     }
+  };
+
+  const handleEdit = (record: FinalDispositionRecord) => {
+    setEditingRecord(record);
+    setShowForm(true);
+  };
+
+  const handleNewRecord = () => {
+    setEditingRecord(null);
+    setShowForm(true);
   };
 
   const getStatusIcon = (type: string) => {
@@ -212,7 +238,7 @@ export const DisposicionApp: React.FC = () => {
                     {isGoogleConnected ? 'Conectar' : 'Desconectar'}
                   </button>
                 </div>
-                <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl font-medium hover:bg-rose-700 transition-all shadow-md shadow-rose-100">
+                <button onClick={showForm ? () => setShowForm(false) : handleNewRecord} className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl font-medium hover:bg-rose-700 transition-all shadow-md shadow-rose-100">
                 {showForm ? <History size={18} /> : <Trash2 size={18} />}
                 {showForm ? 'Ver Historial' : 'Nuevo Registro'}
               </button>
@@ -249,21 +275,30 @@ export const DisposicionApp: React.FC = () => {
         ) : (
           <>
             {showForm ? (
-              <div className="max-w-4xl mx-auto"><DisposicionForm onSubmit={handleSubmit} isSubmitting={isSyncing} /></div>
+              <div className="max-w-4xl mx-auto"><DisposicionForm onSubmit={handleSubmit} isSubmitting={isSyncing} initialData={editingRecord || undefined} /></div>
             ) : (
               <div className="space-y-6">
                 <h2 className="text-2xl font-bold text-zinc-900">Historial de Disposición</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {records.map((record) => (
                     <div key={record.id} className="bg-white p-6 rounded-3xl shadow-sm border border-zinc-100 space-y-4 relative group">
-                      {user?.uid === record.uid && (
-                        <button
-                          onClick={() => record.id && handleDelete(record.id)}
-                          className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-xl opacity-0 group-hover:opacity-100 transition-all"
-                          title="Eliminar registro"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                      {(user?.uid === record.uid || isAdmin) && (
+                        <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                          <button
+                            onClick={() => handleEdit(record)}
+                            className="p-2 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl"
+                            title="Editar registro"
+                          >
+                            <History size={18} />
+                          </button>
+                          <button
+                            onClick={() => record.id && handleDelete(record.id)}
+                            className="p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-xl"
+                            title="Eliminar registro"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       )}
                       <div className="flex justify-between items-start pr-10">
                         <div className="bg-zinc-50 text-zinc-600 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">Unidad: {record.unitId}</div>

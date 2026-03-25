@@ -90,7 +90,7 @@ service cloud.firestore {
              isValidBloodGroup(data.bloodGroup) &&
              isValidRh(data.rh) &&
              data.testDate is string &&
-             data.result in ['Compatible', 'Incompatible', ''] &&
+             data.result in ['Compatible', 'Incompatible', 'Unidad disponible', ''] &&
              data.createdAt is string &&
              (!('eps' in data) || (data.eps is string && data.eps.size() <= 150)) &&
              (!('age' in data) || (data.age is string && data.age.size() <= 20)) &&
@@ -101,10 +101,10 @@ service cloud.firestore {
              (!('unitRh' in data) || isValidRh(data.unitRh)) &&
              (!('unitExpirationDate' in data) || (data.unitExpirationDate is string && data.unitExpirationDate.size() <= 100)) &&
              (!('irregularAntibodies' in data) || (data.irregularAntibodies is string && data.irregularAntibodies.size() <= 200)) &&
-             (!('autocontrol' in data) || data.autocontrol in ['0', '+', '++', '+++', '++++', '']) &&
+             (!('autocontrol' in data) || data.autocontrol in ['0', '+', '++', '+++', '++++', 'Unidad disponible', '']) &&
              (!('temperature' in data) || (data.temperature is string && data.temperature.size() <= 50)) &&
-             (!('provider' in data) || data.provider in ['Hemolife', 'Hemocentro', 'Fueco', '']) &&
-             (!('requestedHemoderivative' in data) || data.requestedHemoderivative in ['Globulos Rojos', 'Plasma Fresco Congelado', 'Plaquetas', '']) &&
+             (!('provider' in data) || data.provider in ['Hemolife', 'Hemocentro', 'FUHECO', '']) &&
+             (!('requestedHemoderivative' in data) || data.requestedHemoderivative in ['Globulos Rojos', 'Plasma Fresco Congelado', 'Plaquetas', 'Plaquetas (Estándar)', 'Plaquetas AFERESIS', '']) &&
              (!('requestType' in data) || data.requestType in ['Reserva', 'Transfusion', 'Urgencia Vital', '']) &&
              (!('qualitySeal' in data) || (data.qualitySeal is string && data.qualitySeal.size() <= 150)) &&
              (!('bacteriologist' in data) || (data.bacteriologist is string && data.bacteriologist.size() <= 150)) &&
@@ -113,7 +113,8 @@ service cloud.firestore {
              (!('responsiblePerson' in data) || (data.responsiblePerson is string && data.responsiblePerson.size() <= 150)) &&
              (!('hemoderivativeUnit' in data) || (data.hemoderivativeUnit is string && data.hemoderivativeUnit.size() <= 150)) &&
              (!('observations' in data) || (data.observations is string && data.observations.size() <= 2000)) &&
-             data.uid == request.auth.uid;
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string));
     }
 
     // Domain Validator for Received Units
@@ -121,8 +122,8 @@ service cloud.firestore {
       return hasRequiredFields(['receptionDate', 'receptionTime', 'provider', 'hemoderivativeType', 'unitId', 'bloodGroup', 'rh', 'expirationDate', 'accepted', 'receiverName', 'supervisorName', 'createdAt', 'uid']) &&
              data.receptionDate is string && data.receptionDate.size() > 0 && data.receptionDate.size() <= 50 &&
              data.receptionTime is string && data.receptionTime.size() > 0 && data.receptionTime.size() <= 50 &&
-             data.provider in ['Hemolife', 'Hemocentro', 'Fueco', ''] &&
-             data.hemoderivativeType in ['Globulos Rojos', 'Plasma Fresco Congelado', 'Plaquetas', ''] &&
+             data.provider in ['Hemolife', 'Hemocentro', 'FUHECO', ''] &&
+             data.hemoderivativeType in ['Globulos Rojos', 'Plasma Fresco Congelado', 'Plaquetas', 'Plaquetas (Estándar)', 'Plaquetas AFERESIS', ''] &&
              data.unitId is string && data.unitId.size() > 0 && data.unitId.size() <= 100 &&
              isValidBloodGroup(data.bloodGroup) &&
              isValidRh(data.rh) &&
@@ -141,7 +142,8 @@ service cloud.firestore {
              (!('actionsTaken' in data) || (data.actionsTaken is string && data.actionsTaken.size() <= 500)) &&
              (!('reporterName' in data) || (data.reporterName is string && data.reporterName.size() <= 150)) &&
              (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
-             data.uid == request.auth.uid;
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string));
     }
 
     // Domain Validator for Transfusion Use
@@ -166,6 +168,7 @@ service cloud.firestore {
              (!('prescriptionFormat' in data) || data.prescriptionFormat in ['Sí', 'No', '']) &&
              (!('informedConsent' in data) || data.informedConsent in ['Sí', 'No', '']) &&
              (!('adminChecklist' in data) || data.adminChecklist in ['Sí', 'No', '']) &&
+             (!('nursingNote' in data) || data.nursingNote in ['Sí', 'No', '']) &&
              (!('adverseReaction' in data) || data.adverseReaction in ['Sí', 'No', '']) &&
              (!('safetyEvent' in data) || (data.safetyEvent is string && data.safetyEvent.size() <= 1000)) &&
              (!('reactionDescription' in data) || (data.reactionDescription is string && data.reactionDescription.size() <= 1000)) &&
@@ -176,7 +179,8 @@ service cloud.firestore {
              (!('preVitalSigns' in data) || data.preVitalSigns is map) &&
              (!('duringVitalSigns' in data) || data.duringVitalSigns is map) &&
              (!('postVitalSigns' in data) || data.postVitalSigns is map) &&
-             data.uid == request.auth.uid;
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string));
     }
 
     // Domain Validator for Final Disposition
@@ -191,7 +195,8 @@ service cloud.firestore {
              (!('reason' in data) || (data.reason is string && data.reason.size() <= 500)) &&
              (!('observations' in data) || (data.observations is string && data.observations.size() <= 2000)) &&
              (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
-             data.uid == request.auth.uid;
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string));
     }
 
     // ===============================================================
@@ -200,28 +205,28 @@ service cloud.firestore {
 
     match /bloodTestRecords/{recordId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidBloodTestRecord(request.resource.data);
+      allow create: if isAuthenticated() && isValidBloodTestRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
       allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidBloodTestRecord(request.resource.data) && uidNotModified();
       allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
 
     match /receivedUnits/{recordId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidReceivedUnitRecord(request.resource.data);
+      allow create: if isAuthenticated() && isValidReceivedUnitRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
       allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidReceivedUnitRecord(request.resource.data) && uidNotModified();
       allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
 
     match /transfusionUse/{recordId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidTransfusionUseRecord(request.resource.data);
+      allow create: if isAuthenticated() && isValidTransfusionUseRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
       allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidTransfusionUseRecord(request.resource.data) && uidNotModified();
       allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
 
     match /finalDisposition/{recordId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidFinalDispositionRecord(request.resource.data);
+      allow create: if isAuthenticated() && isValidFinalDispositionRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
       allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidFinalDispositionRecord(request.resource.data) && uidNotModified();
       allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }

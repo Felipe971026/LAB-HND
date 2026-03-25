@@ -6,16 +6,21 @@ import { RecepcionRecordCard } from '../../components/RecepcionRecordCard';
 import { ReceivedUnitRecord } from '../../types';
 import { auth, db, loginWithGoogle, logout, handleFirestoreError, OperationType } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, addDoc, doc, deleteDoc, writeBatch, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, doc, deleteDoc, writeBatch, where, getDocs, updateDoc } from 'firebase/firestore';
 
 export const RecepcionApp: React.FC = () => {
   const navigate = useNavigate();
   const [records, setRecords] = useState<ReceivedUnitRecord[]>([]);
+  const [transfusionRecords, setTransfusionRecords] = useState<any[]>([]);
+  const [dispositionRecords, setDispositionRecords] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<ReceivedUnitRecord | null>(null);
+  const [filter, setFilter] = useState<'all' | 'available' | 'used'>('all');
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   
   const [isSystemUnlocked, setIsSystemUnlocked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -104,7 +109,34 @@ export const RecepcionApp: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
 
-    return () => unsubscribe();
+    // Fetch transfusion and disposition records to check availability
+    const transfusionQuery = query(collection(db, 'transfusionUse'));
+    const unsubscribeTransfusion = onSnapshot(transfusionQuery, (snapshot) => {
+      const data: any[] = [];
+      snapshot.forEach((doc) => {
+        data.push({ id: doc.id, ...doc.data() });
+      });
+      setTransfusionRecords(data);
+    }, (error) => {
+      console.error('Error fetching transfusion records for availability:', error);
+    });
+
+    const dispositionQuery = query(collection(db, 'finalDisposition'));
+    const unsubscribeDisposition = onSnapshot(dispositionQuery, (snapshot) => {
+      const data: any[] = [];
+      snapshot.forEach((doc) => {
+        data.push({ id: doc.id, ...doc.data() });
+      });
+      setDispositionRecords(data);
+    }, (error) => {
+      console.error('Error fetching disposition records for availability:', error);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeTransfusion();
+      unsubscribeDisposition();
+    };
   }, [isAuthReady, user, isSystemUnlocked]);
 
   const handleGoogleLogin = async () => {
@@ -144,9 +176,13 @@ export const RecepcionApp: React.FC = () => {
     const normalizedUsername = username.trim().toLowerCase();
     if (
       (normalizedUsername === 'resepcionhemo' && password === 'Recepcionhemo2026*') ||
-      (normalizedUsername === 'admin' && password === 'admin')
+      (normalizedUsername === 'admin' && password === 'admin') ||
+      (user?.email === 'ingbiomedico@ucihonda.com.co')
     ) {
       setIsSystemUnlocked(true);
+      if (normalizedUsername === 'admin' || user?.email === 'ingbiomedico@ucihonda.com.co') {
+        setIsAdmin(true);
+      }
     } else {
       setLoginError('Usuario o contraseña incorrectos.');
     }
@@ -183,33 +219,58 @@ export const RecepcionApp: React.FC = () => {
 
   const handleSubmit = async (newRecords: Omit<ReceivedUnitRecord, 'id' | 'createdAt' | 'uid' | 'userEmail'>[]) => {
     if (!user) return;
+    setIsSyncing(true);
 
     try {
-      const batch = writeBatch(db);
-      const recordsToSync: ReceivedUnitRecord[] = [];
-
-      for (const record of newRecords) {
-        const docRef = doc(collection(db, 'receivedUnits'));
-        const fullRecord = {
-          ...record,
-          createdAt: new Date().toISOString(),
-          uid: user.uid,
-          userEmail: user.email || 'Desconocido'
+      if (editingRecord?.id) {
+        // Handle single record update
+        const updateData = {
+          ...newRecords[0],
+          updatedAt: new Date().toISOString(),
+          updatedBy: user.email || 'Desconocido'
         };
-        batch.set(docRef, fullRecord);
-        recordsToSync.push({ id: docRef.id, ...fullRecord } as ReceivedUnitRecord);
-      }
+        await updateDoc(doc(db, 'receivedUnits', editingRecord.id), updateData);
+        setEditingRecord(null);
+      } else {
+        // Handle bulk create
+        const batch = writeBatch(db);
+        const recordsToSync: ReceivedUnitRecord[] = [];
 
-      await batch.commit();
-      
-      if (isGoogleConnected) {
-        await syncToSheets(recordsToSync);
+        for (const record of newRecords) {
+          const docRef = doc(collection(db, 'receivedUnits'));
+          const fullRecord = {
+            ...record,
+            createdAt: new Date().toISOString(),
+            uid: user.uid,
+            userEmail: user.email || 'Desconocido'
+          };
+          batch.set(docRef, fullRecord);
+          recordsToSync.push({ id: docRef.id, ...fullRecord } as ReceivedUnitRecord);
+        }
+
+        await batch.commit();
+        
+        if (isGoogleConnected) {
+          await syncToSheets(recordsToSync);
+        }
       }
       
       setShowForm(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'receivedUnits');
+      handleFirestoreError(error, editingRecord ? OperationType.UPDATE : OperationType.CREATE, 'receivedUnits');
+    } finally {
+      setIsSyncing(false);
     }
+  };
+
+  const handleEdit = (record: ReceivedUnitRecord) => {
+    setEditingRecord(record);
+    setShowForm(true);
+  };
+
+  const handleNewRecord = () => {
+    setEditingRecord(null);
+    setShowForm(true);
   };
 
   const handleDelete = async (id: string) => {
@@ -221,6 +282,15 @@ export const RecepcionApp: React.FC = () => {
       }
     }
   };
+
+  const filteredRecords = records.filter(record => {
+    const isUsed = transfusionRecords.some(t => t.unitId === record.unitId || t.qualitySeal === record.qualitySeal) ||
+                   dispositionRecords.some(d => d.unitId === record.unitId || d.qualitySeal === record.qualitySeal);
+    
+    if (filter === 'available') return !isUsed;
+    if (filter === 'used') return isUsed;
+    return true;
+  });
 
   if (!isAuthReady) {
     return (
@@ -273,7 +343,7 @@ export const RecepcionApp: React.FC = () => {
                 </div>
 
                 <button
-                  onClick={() => setShowForm(!showForm)}
+                  onClick={showForm ? () => setShowForm(false) : handleNewRecord}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition-all ${
                     showForm 
                     ? 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200' 
@@ -383,33 +453,78 @@ export const RecepcionApp: React.FC = () => {
           <>
             {showForm ? (
               <div className="max-w-4xl mx-auto">
-                <RecepcionForm onSubmit={handleSubmit} isSubmitting={isSyncing} />
+                <RecepcionForm 
+                  onSubmit={handleSubmit} 
+                  isSubmitting={isSyncing} 
+                  initialData={editingRecord || undefined}
+                />
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <h2 className="text-2xl font-bold text-zinc-900">Historial de Recepción</h2>
+                  
+                  <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-zinc-200 shadow-sm">
+                    <button
+                      onClick={() => setFilter('all')}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        filter === 'all' ? 'bg-zinc-900 text-white shadow-md' : 'text-zinc-500 hover:bg-zinc-50'
+                      }`}
+                    >
+                      Todos
+                    </button>
+                    <button
+                      onClick={() => setFilter('available')}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        filter === 'available' ? 'bg-green-600 text-white shadow-md' : 'text-zinc-500 hover:bg-zinc-50'
+                      }`}
+                    >
+                      Disponibles
+                    </button>
+                    <button
+                      onClick={() => setFilter('used')}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        filter === 'used' ? 'bg-blue-600 text-white shadow-md' : 'text-zinc-500 hover:bg-zinc-50'
+                      }`}
+                    >
+                      Utilizados
+                    </button>
+                  </div>
+
                   <div className="text-sm text-zinc-500">
-                    Total: <span className="font-bold text-zinc-900">{records.length}</span> unidades
+                    Mostrando: <span className="font-bold text-zinc-900">{filteredRecords.length}</span> de <span className="font-bold text-zinc-900">{records.length}</span>
                   </div>
                 </div>
 
-                {records.length === 0 ? (
+                {filteredRecords.length === 0 ? (
                   <div className="text-center py-20 bg-white rounded-3xl border border-zinc-100 border-dashed">
                     <Inbox className="mx-auto h-12 w-12 text-zinc-300 mb-4" />
                     <h3 className="text-lg font-medium text-zinc-900">No hay registros</h3>
-                    <p className="text-zinc-500 mt-1">Comienza agregando una nueva recepción de hemoderivados.</p>
+                    <p className="text-zinc-500 mt-1">
+                      {filter === 'all' 
+                        ? 'Comienza agregando una nueva recepción de hemoderivados.' 
+                        : filter === 'available' 
+                        ? 'No hay componentes disponibles en este momento.' 
+                        : 'No hay componentes marcados como utilizados.'}
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {records.map((record) => (
-                      <RecepcionRecordCard
-                        key={record.id}
-                        record={record}
-                        onDelete={handleDelete}
-                        currentUserUid={user?.uid}
-                      />
-                    ))}
+                    {filteredRecords.map((record) => {
+                      const isUsed = transfusionRecords.some(t => t.unitId === record.unitId || t.qualitySeal === record.qualitySeal) ||
+                                     dispositionRecords.some(d => d.unitId === record.unitId || d.qualitySeal === record.qualitySeal);
+                      return (
+                        <RecepcionRecordCard
+                          key={record.id}
+                          record={record}
+                          isUsed={isUsed}
+                          onDelete={handleDelete}
+                          onEdit={handleEdit}
+                          currentUserUid={user?.uid}
+                          isAdmin={isAdmin}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>

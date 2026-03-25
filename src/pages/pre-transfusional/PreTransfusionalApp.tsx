@@ -1,28 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BloodTestForm } from '../../components/BloodTestForm';
+import { generateInterpretation } from '../../utils/bloodTestUtils';
 import { RecordCard } from '../../components/RecordCard';
 import { BloodTestRecord } from '../../types';
 import { Droplets, History, Plus, Search, LogIn, LogOut, User as UserIcon, ShieldCheck, X, FileText, Calendar, UserCheck, Activity, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, loginWithGoogle, logout, handleFirestoreError, OperationType } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, addDoc, doc, deleteDoc, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, doc, deleteDoc, where, getDocs, updateDoc } from 'firebase/firestore';
 
 export const PreTransfusionalApp: React.FC = () => {
   const navigate = useNavigate();
   const [records, setRecords] = useState<BloodTestRecord[]>([]);
   const [receivedUnits, setReceivedUnits] = useState<any[]>([]);
+  const [transfusionRecords, setTransfusionRecords] = useState<any[]>([]);
+  const [dispositionRecords, setDispositionRecords] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<BloodTestRecord | null>(null);
+  const [editingRecord, setEditingRecord] = useState<BloodTestRecord | null>(null);
   const [recordToDelete, setRecordToDelete] = useState<string | null>(null);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
 
   const [isSystemUnlocked, setIsSystemUnlocked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -103,9 +108,13 @@ export const PreTransfusionalApp: React.FC = () => {
     const normalizedUsername = username.trim().toLowerCase();
     if (
       (normalizedUsername === 'lvaleriano' && password === 'LAB2026*') ||
-      (normalizedUsername === 'admin' && password === 'admin')
+      (normalizedUsername === 'admin' && password === 'admin') ||
+      (user?.email === 'ingbiomedico@ucihonda.com.co')
     ) {
       setIsSystemUnlocked(true);
+      if (normalizedUsername === 'admin' || user?.email === 'ingbiomedico@ucihonda.com.co') {
+        setIsAdmin(true);
+      }
     } else {
       setLoginError('Usuario o contraseña incorrectos.');
     }
@@ -177,43 +186,99 @@ export const PreTransfusionalApp: React.FC = () => {
       handleFirestoreError(error, OperationType.GET, receivedUnitsPath);
     });
 
+    const transfusionPath = 'transfusionUse';
+    const qTransfusion = query(collection(db, transfusionPath));
+    const unsubscribeTransfusion = onSnapshot(qTransfusion, (snapshot) => {
+      const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setTransfusionRecords(fetched);
+    });
+
+    const dispositionPath = 'finalDisposition';
+    const qDisposition = query(collection(db, dispositionPath));
+    const unsubscribeDisposition = onSnapshot(qDisposition, (snapshot) => {
+      const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setDispositionRecords(fetched);
+    });
+
     return () => {
       unsubscribe();
       unsubscribeReceivedUnits();
+      unsubscribeTransfusion();
+      unsubscribeDisposition();
     };
   }, [isAuthReady, user, isSystemUnlocked]);
 
-  const saveRecord = async (record: BloodTestRecord) => {
+  const saveRecord = async (recordData: Omit<BloodTestRecord, 'id' | 'createdAt' | 'uid' | 'userEmail'>) => {
     if (!user) return;
 
     const path = 'bloodTestRecords';
     try {
-      // 1. Save to Firestore
-      await addDoc(collection(db, path), {
-        ...record,
-        uid: user.uid,
-      });
+      if (editingRecord?.id) {
+        // Update existing record
+        const updateData = {
+          ...recordData,
+          updatedAt: new Date().toISOString(),
+          updatedBy: user.email || user.uid,
+        };
+        await updateDoc(doc(db, path, editingRecord.id), updateData);
+        
+        // Sync update to Google Sheets if connected
+        if (isGoogleConnected) {
+          setIsSyncing(true);
+          try {
+            await fetch('/api/sync/sheets/update', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: editingRecord.id, ...updateData }),
+            });
+          } catch (syncError) {
+            console.error('Error syncing update to Google Sheets:', syncError);
+          } finally {
+            setIsSyncing(false);
+          }
+        }
+      } else {
+        // Create new record
+        const newRecord = {
+          ...recordData,
+          uid: user.uid,
+          userEmail: user.email || '',
+          createdAt: new Date().toISOString(),
+        };
+        await addDoc(collection(db, path), newRecord);
 
-      // 2. Sync to Google Sheets if connected
-      if (isGoogleConnected) {
-        setIsSyncing(true);
-        try {
-          await fetch('/api/sync/sheets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(record),
-          });
-        } catch (syncError) {
-          console.error('Error syncing to Google Sheets:', syncError);
-        } finally {
-          setIsSyncing(false);
+        // Sync to Google Sheets if connected
+        if (isGoogleConnected) {
+          setIsSyncing(true);
+          try {
+            await fetch('/api/sync/sheets', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newRecord),
+            });
+          } catch (syncError) {
+            console.error('Error syncing to Google Sheets:', syncError);
+          } finally {
+            setIsSyncing(false);
+          }
         }
       }
 
+      setEditingRecord(null);
       setShowForm(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, path);
+      handleFirestoreError(error, editingRecord ? OperationType.UPDATE : OperationType.CREATE, path);
     }
+  };
+
+  const handleEdit = (record: BloodTestRecord) => {
+    setEditingRecord(record);
+    setShowForm(true);
+  };
+
+  const handleNewRecord = () => {
+    setEditingRecord(null);
+    setShowForm(true);
   };
 
   const deleteRecord = (id: string) => {
@@ -246,20 +311,32 @@ export const PreTransfusionalApp: React.FC = () => {
   });
 
   const groupedRecords = filteredRecords.reduce((acc, record) => {
-    const safeKey = `${record.patientId || 'unknown'}_${(record.patientName || '').trim().toLowerCase()}_${record.bloodGroup || ''}${record.rh || ''}`;
+    const patientKey = `${record.patientId || 'unknown'}_${(record.patientName || '').trim().toLowerCase()}_${record.bloodGroup || ''}${record.rh || ''}`;
     
-    if (!acc[safeKey]) {
-      acc[safeKey] = {
+    if (!acc[patientKey]) {
+      acc[patientKey] = {
         patientId: record.patientId || 'Desconocido',
         patientName: record.patientName || 'Desconocido',
         bloodGroup: record.bloodGroup || '',
         rh: record.rh || '',
-        records: []
+        hemoderivativeGroups: {}
       };
     }
-    acc[safeKey].records.push(record);
+
+    const hemoType = record.requestedHemoderivative || 'Otro';
+    if (!acc[patientKey].hemoderivativeGroups[hemoType]) {
+      acc[patientKey].hemoderivativeGroups[hemoType] = [];
+    }
+    acc[patientKey].hemoderivativeGroups[hemoType].push(record);
+    
     return acc;
-  }, {} as Record<string, { patientId: string, patientName: string, bloodGroup: string, rh: string, records: BloodTestRecord[] }>);
+  }, {} as Record<string, { 
+    patientId: string, 
+    patientName: string, 
+    bloodGroup: string, 
+    rh: string, 
+    hemoderivativeGroups: Record<string, BloodTestRecord[]> 
+  }>);
 
   if (!isAuthReady) {
     return (
@@ -318,7 +395,7 @@ export const PreTransfusionalApp: React.FC = () => {
                   <span className="font-medium">LVALERIANO</span>
                 </div>
                 <button
-                  onClick={() => setShowForm(!showForm)}
+                  onClick={showForm ? () => setShowForm(false) : handleNewRecord}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition-all ${
                     showForm 
                     ? 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200' 
@@ -444,6 +521,9 @@ export const PreTransfusionalApp: React.FC = () => {
                   existingRecords={records}
                   isSyncing={isSyncing}
                   receivedUnits={receivedUnits}
+                  transfusionRecords={transfusionRecords}
+                  dispositionRecords={dispositionRecords}
+                  initialData={editingRecord || undefined}
                 />
               </motion.div>
             ) : (
@@ -476,9 +556,9 @@ export const PreTransfusionalApp: React.FC = () => {
                 {/* Records Grid */}
                 {Object.keys(groupedRecords).length > 0 ? (
                   <div className="space-y-10">
-                    {Object.entries(groupedRecords).map(([safeKey, group], idx) => (
+                    {Object.entries(groupedRecords).map(([patientKey, group], idx) => (
                       <motion.div
-                        key={safeKey}
+                        key={patientKey}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: idx * 0.05 }}
@@ -491,19 +571,37 @@ export const PreTransfusionalApp: React.FC = () => {
                           <div>
                             <h3 className="text-xl font-bold text-zinc-900">{group.patientName}</h3>
                             <p className="text-sm text-zinc-500 font-medium">
-                              ID: {group.patientId} • Grupo: <span className="text-red-600 font-bold">{group.bloodGroup}{group.rh}</span> • {group.records.length} registro(s)
+                              ID: {group.patientId} • Grupo: <span className="text-red-600 font-bold">{group.bloodGroup}{group.rh}</span>
                             </p>
                           </div>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                          {group.records.map((record) => (
-                            <RecordCard 
-                              key={record.id || record.createdAt} 
-                              record={record} 
-                              onView={setSelectedRecord}
-                              onDelete={deleteRecord}
-                              currentUserUid={user?.uid}
-                            />
+
+                        <div className="space-y-8">
+                          {Object.entries(group.hemoderivativeGroups).map(([hemoType, records]) => (
+                            <div key={hemoType} className="space-y-4">
+                              <h4 className="text-xs font-black uppercase tracking-widest text-zinc-400 flex items-center gap-2">
+                                <Droplets size={14} className="text-red-500" />
+                                {hemoType} ({records.length})
+                              </h4>
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {records.map((record) => {
+                                  const isUsed = transfusionRecords.some(t => t.unitId === record.unitId || t.qualitySeal === record.qualitySeal) ||
+                                                dispositionRecords.some(d => d.unitId === record.unitId || d.qualitySeal === record.qualitySeal);
+                                  return (
+                                    <RecordCard 
+                                      key={record.id || record.createdAt} 
+                                      record={record} 
+                                      onView={setSelectedRecord}
+                                      onDelete={deleteRecord}
+                                      onEdit={handleEdit}
+                                      currentUserUid={user?.uid}
+                                      isAdmin={isAdmin}
+                                      isUsed={isUsed}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       </motion.div>
@@ -623,10 +721,15 @@ export const PreTransfusionalApp: React.FC = () => {
                 <div className="bg-zinc-50 p-4 rounded-2xl">
                   <p className="text-sm text-zinc-500 mb-2">Resultado</p>
                   <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold ${
-                    selectedRecord.result === 'Compatible' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    selectedRecord.result === 'Compatible' ? 'bg-green-100 text-green-700' : 
+                    selectedRecord.result === 'Unidad disponible' ? 'bg-blue-100 text-blue-700' : 
+                    'bg-red-100 text-red-700'
                   }`}>
                     {selectedRecord.result.toUpperCase()}
                   </span>
+                  <div className="mt-3 p-3 bg-white rounded-xl border border-zinc-100 text-sm italic text-zinc-600">
+                    {generateInterpretation(selectedRecord)}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -653,6 +756,34 @@ export const PreTransfusionalApp: React.FC = () => {
                     <p className="text-sm text-zinc-500 mb-1">Temperatura (°C)</p>
                     <p className="font-medium text-zinc-900">{selectedRecord.temperature || 'N/A'}</p>
                   </div>
+                </div>
+
+                {/* SIHEVI Section */}
+                <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                  <p className="text-xs font-black text-blue-600 uppercase tracking-widest mb-3 flex items-center gap-2">
+                    <ShieldCheck size={14} />
+                    Información SIHEVI
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-zinc-500 mb-1">Reporte SIHEVI</p>
+                      <p className={`font-bold ${selectedRecord.siheviReport === 'Sí' ? 'text-green-600' : 'text-zinc-500'}`}>
+                        {selectedRecord.siheviReport || 'No reportado'}
+                      </p>
+                    </div>
+                    {selectedRecord.siheviDescription && (
+                      <div>
+                        <p className="text-sm text-zinc-500 mb-1">Descripción</p>
+                        <p className="text-sm text-zinc-900 font-medium">{selectedRecord.siheviDescription}</p>
+                      </div>
+                    )}
+                  </div>
+                  {selectedRecord.siheviPredefinedText && (
+                    <div className="mt-3 pt-3 border-t border-blue-100">
+                      <p className="text-sm text-zinc-500 mb-1">Comentario Preestablecido</p>
+                      <p className="text-sm text-blue-900 italic font-medium">"{selectedRecord.siheviPredefinedText}"</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>

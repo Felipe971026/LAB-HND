@@ -5,18 +5,50 @@ import { Save, AlertCircle, Plus, Trash2, ChevronDown, ChevronUp, Layers, CheckC
 interface RecepcionFormProps {
   onSubmit: (records: Omit<ReceivedUnitRecord, 'id' | 'createdAt' | 'uid' | 'userEmail'>[]) => Promise<void>;
   isSubmitting: boolean;
+  initialData?: ReceivedUnitRecord;
 }
 
-export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmitting }) => {
+export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmitting, initialData }) => {
+  const receptores = [
+    "Andrés Fernando Villegas Quintero",
+    "Carmenza Suarez Martinez",
+    "Leidy Katherine Rubiano Rico",
+    "Margie Lizeth Moreno Reyes",
+    "María Alejandra Figueroa Delgado",
+    "Olivia Lozano Vásquez",
+    "Silvia María López Ávila"
+  ].sort((a, b) => a.localeCompare(b));
+
+  const supervisores = [
+    "Luis Israel Valeriano Rodríguez",
+    "Omadis Emelda Meza González"
+  ].sort((a, b) => a.localeCompare(b));
+
   const [generalInfo, setGeneralInfo] = useState({
-    receptionDate: new Date().toISOString().split('T')[0],
-    receptionTime: new Date().toTimeString().slice(0, 5),
-    provider: '' as ReceivedUnitRecord['provider'],
-    receiverName: '',
-    supervisorName: '',
+    receptionDate: initialData?.receptionDate || new Date().toISOString().split('T')[0],
+    receptionTime: initialData?.receptionTime || new Date().toTimeString().slice(0, 5),
+    provider: initialData?.provider || '' as ReceivedUnitRecord['provider'],
+    receiverName: initialData?.receiverName || '',
+    supervisorName: initialData?.supervisorName || '',
   });
 
-  const [units, setUnits] = useState<Partial<ReceivedUnitRecord>[]>([{
+  const [units, setUnits] = useState<Partial<ReceivedUnitRecord>[]>(initialData ? [{
+    hemoderivativeType: initialData.hemoderivativeType,
+    unitId: initialData.unitId,
+    qualitySeal: initialData.qualitySeal,
+    bloodGroup: initialData.bloodGroup,
+    rh: initialData.rh,
+    volume: initialData.volume,
+    expirationDate: initialData.expirationDate,
+    packagingIntegrity: initialData.packagingIntegrity,
+    contentAspect: initialData.contentAspect,
+    temperature: initialData.temperature,
+    observations: initialData.observations,
+    accepted: initialData.accepted,
+    rejectionReason: initialData.rejectionReason,
+    actionsTaken: initialData.actionsTaken,
+    reporterName: initialData.reporterName,
+  }] : [{
     hemoderivativeType: '',
     unitId: '',
     qualitySeal: '',
@@ -38,12 +70,28 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
   const [error, setError] = useState('');
 
   const handleGeneralChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setGeneralInfo({ ...generalInfo, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setGeneralInfo({ ...generalInfo, [name]: value });
+
+    // Automation for Hemocentro: if provider is Hemocentro, sync qualitySeal with unitId for all units
+    if (name === 'provider' && value === 'Hemocentro') {
+      setUnits(prevUnits => prevUnits.map(unit => ({
+        ...unit,
+        qualitySeal: unit.unitId || ''
+      })));
+    }
   };
 
   const handleUnitChange = (index: number, e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
     const newUnits = [...units];
-    newUnits[index] = { ...newUnits[index], [e.target.name]: e.target.value };
+    newUnits[index] = { ...newUnits[index], [name]: value };
+
+    // Automation for Hemocentro: if provider is Hemocentro and unitId changes, sync qualitySeal
+    if (generalInfo.provider === 'Hemocentro' && name === 'unitId') {
+      newUnits[index].qualitySeal = value;
+    }
+
     setUnits(newUnits);
   };
 
@@ -153,8 +201,8 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-xl border border-zinc-100 overflow-hidden">
       <div className="bg-blue-600 p-6 text-white">
-        <h2 className="text-2xl font-bold">Formato de Recepción de Hemoderivados</h2>
-        <p className="text-blue-100 mt-1">Complete la información del ingreso</p>
+        <h2 className="text-2xl font-bold">{initialData ? 'Editar Recepción de Hemoderivado' : 'Formato de Recepción de Hemoderivados'}</h2>
+        <p className="text-blue-100 mt-1">{initialData ? 'Modifique la información del ingreso' : 'Complete la información del ingreso'}</p>
       </div>
 
       <div className="p-8 space-y-8">
@@ -203,7 +251,7 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
                 <option value="">Seleccione un proveedor...</option>
                 <option value="Hemolife">Hemolife</option>
                 <option value="Hemocentro">Hemocentro</option>
-                <option value="Fueco">Fueco</option>
+                <option value="FUHECO">FUHECO</option>
               </select>
             </div>
           </div>
@@ -219,7 +267,7 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
               </span>
             </div>
             <div className="flex items-center gap-2">
-              {units.length > 1 && (
+              {!initialData && units.length > 1 && (
                 <div className="flex items-center bg-zinc-100 rounded-lg p-1 mr-2">
                   <button
                     type="button"
@@ -239,13 +287,15 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
                   </button>
                 </div>
               )}
-              <button
-                type="button"
-                onClick={addUnit}
-                className="flex items-center gap-2 text-sm bg-blue-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
-              >
-                <Plus size={18} /> Agregar Unidad
-              </button>
+              {!initialData && (
+                <button
+                  type="button"
+                  onClick={addUnit}
+                  className="flex items-center gap-2 text-sm bg-blue-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+                >
+                  <Plus size={18} /> Agregar Unidad
+                </button>
+              )}
             </div>
           </div>
 
@@ -297,7 +347,7 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
                         {collapsedUnits[index] ? <ChevronDown size={14} /> : <CheckCircle size={14} />}
                         {collapsedUnits[index] ? 'Editar' : 'Finalizar Edición'}
                       </button>
-                      {units.length > 1 && (
+                      {!initialData && units.length > 1 && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -332,7 +382,8 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
                           <option value="">Seleccione...</option>
                           <option value="Globulos Rojos">Glóbulos Rojos</option>
                           <option value="Plasma Fresco Congelado">Plasma Fresco Congelado</option>
-                          <option value="Plaquetas">Plaquetas</option>
+                          <option value="Plaquetas">Plaquetas (Estándar)</option>
+                          <option value="Plaquetas AFERESIS">Plaquetas AFERESIS</option>
                         </select>
                       </div>
                       <div>
@@ -531,24 +582,26 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
             ))}
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-4 mt-6">
-            <button
-              type="button"
-              onClick={addUnit}
-              className="flex-1 flex items-center justify-center gap-2 py-4 border-2 border-dashed border-zinc-200 rounded-2xl text-zinc-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all font-medium"
-            >
-              <Plus size={20} /> Agregar otra unidad a esta recepción
-            </button>
-            {units.length > 3 && (
+          {!initialData && (
+            <div className="flex flex-col sm:flex-row gap-4 mt-6">
               <button
                 type="button"
-                onClick={collapseAll}
-                className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2"
+                onClick={addUnit}
+                className="flex-1 flex items-center justify-center gap-2 py-4 border-2 border-dashed border-zinc-200 rounded-2xl text-zinc-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all font-medium"
               >
-                <ChevronUp size={20} /> Contraer Todas
+                <Plus size={20} /> Agregar otra unidad a esta recepción
               </button>
-            )}
-          </div>
+              {units.length > 3 && (
+                <button
+                  type="button"
+                  onClick={collapseAll}
+                  className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2"
+                >
+                  <ChevronUp size={20} /> Contraer Todas
+                </button>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Firmas Generales */}
@@ -556,26 +609,34 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
           <h3 className="text-lg font-bold text-zinc-800">Firmas de Recepción</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-zinc-700 mb-2">Firma y nombre del receptor</label>
-              <input
-                type="text"
+              <label className="block text-sm font-medium text-zinc-700 mb-2">Receptor (Quien recibe)</label>
+              <select
                 name="receiverName"
                 value={generalInfo.receiverName}
                 onChange={handleGeneralChange}
                 className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                 required
-              />
+              >
+                <option value="">Seleccione un receptor...</option>
+                {receptores.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-700 mb-2">Firma y nombre del supervisor</label>
-              <input
-                type="text"
+              <label className="block text-sm font-medium text-zinc-700 mb-2">Supervisor (Quien verifica)</label>
+              <select
                 name="supervisorName"
                 value={generalInfo.supervisorName}
                 onChange={handleGeneralChange}
                 className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                 required
-              />
+              >
+                <option value="">Seleccione un supervisor...</option>
+                {supervisores.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
             </div>
           </div>
         </section>
@@ -590,7 +651,7 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
           ) : (
             <>
               <Save size={24} />
-              Guardar Recepción
+              {initialData ? 'Actualizar Registro' : 'Guardar Recepción'}
             </>
           )}
         </button>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BloodTestRecord, ReceivedUnitRecord } from '../types';
+import { generateInterpretation } from '../utils/bloodTestUtils';
 import { Save, User, IdCard, Calendar, Droplets, ShieldCheck, UserCheck, FileText, Activity, AlertTriangle, MapPin, Hash, CheckCircle, XCircle, Search, Package } from 'lucide-react';
 
 interface BloodTestFormProps {
@@ -7,11 +8,23 @@ interface BloodTestFormProps {
   userEmail?: string;
   existingRecords: BloodTestRecord[];
   receivedUnits?: ReceivedUnitRecord[];
+  transfusionRecords?: any[];
+  dispositionRecords?: any[];
   isSyncing?: boolean;
+  initialData?: BloodTestRecord;
 }
 
-export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail, existingRecords, receivedUnits = [], isSyncing }) => {
-  const [formData, setFormData] = useState<Partial<BloodTestRecord>>({
+export const BloodTestForm: React.FC<BloodTestFormProps> = ({ 
+  onSave, 
+  userEmail, 
+  existingRecords, 
+  receivedUnits = [], 
+  transfusionRecords = [],
+  dispositionRecords = [],
+  isSyncing,
+  initialData
+}) => {
+  const [formData, setFormData] = useState<Partial<BloodTestRecord>>(initialData || {
     bloodGroup: 'O',
     rh: '+',
     testDate: new Date().toISOString().slice(0, 19), // YYYY-MM-DDTHH:mm:ss
@@ -21,7 +34,6 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
     eps: '',
     age: '',
     gender: 'M',
-    zone: 'U',
     unitId: '',
     unitGroup: 'O',
     unitRh: '+',
@@ -33,9 +45,40 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
     requestedHemoderivative: 'Globulos Rojos',
     requestType: 'Reserva',
     qualitySeal: '',
+    justification: '',
+    siheviReport: 'No',
+    siheviDescription: '',
+    siheviPredefinedText: '',
     bacteriologist: 'Dr. Luis Valeriano',
     registryNumber: '111',
   });
+
+  const JUSTIFICATION_OPTIONS: Record<string, string[]> = {
+    'Globulos Rojos': [
+      'Hb < 7 Sepsis severa o choque séptico.',
+      'Paciente coronario con Hb < 10',
+      'Paciente con dobutamina > 8 mcg/kg/min e hipoperfusión tisular',
+      'Sospecha de hipercoagulabilidad',
+      'Anemia o pérdida activa por choque hipovolémico'
+    ],
+    'Plaquetas (Estándar)': [
+      'Paciente con plaquetas < 50000 y requiere cirugía',
+      'Paciente con plaquetas < 10000',
+      'Paciente con plaquetas < 20000 y patología de HTA, DM, Ancianos, Coronarios',
+      'Paciente con plaquetas < 50000 y descenso del 50 % en 24 horas'
+    ],
+    'Plaquetas AFERESIS': [
+      'Paciente con plaquetas < 50000 y requiere cirugía',
+      'Paciente con plaquetas < 10000',
+      'Paciente con plaquetas < 20000 y patología de HTA, DM, Ancianos, Coronarios',
+      'Paciente con plaquetas < 50000 y descenso del 50 % en 24 horas'
+    ],
+    'Plasma Fresco Congelado': [
+      'INR > 20',
+      'INR? Sangrado con antecedente de Warfarina ambulatoria',
+      'INR > 12 requiere cirugía'
+    ]
+  };
 
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{message: string, onConfirm: () => void} | null>(null);
@@ -43,6 +86,12 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
   const [unitValidationMessage, setUnitValidationMessage] = useState<{text: string, type: 'success' | 'error'} | null>(null);
   const [searchingPatient, setSearchingPatient] = useState(false);
   const [searchingUnit, setSearchingUnit] = useState(false);
+
+  useEffect(() => {
+    if (initialData) {
+      setFormData(initialData);
+    }
+  }, [initialData]);
 
   const handleValidatePatient = async () => {
     const patientId = formData.patientId?.trim();
@@ -69,7 +118,6 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
         eps: latestRecord.eps || '',
         age: latestRecord.age || '',
         gender: latestRecord.gender || 'M',
-        zone: latestRecord.zone || 'U',
         bloodGroup: latestRecord.bloodGroup || 'O',
         rh: latestRecord.rh || '+',
       }));
@@ -94,8 +142,15 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
     await new Promise(resolve => setTimeout(resolve, 500));
 
     const unitRecord = receivedUnits.find(u => u.unitId === unitId || u.qualitySeal === unitId);
+    const isUsed = transfusionRecords.some(t => t.unitId === unitId || t.qualitySeal === unitId) ||
+                   dispositionRecords.some(d => d.unitId === unitId || d.qualitySeal === unitId);
 
     if (unitRecord) {
+      if (isUsed) {
+        setAlertMessage(`NOVEDAD: La unidad "${unitId}" ya ha sido UTILIZADA o tiene una DISPOSICIÓN FINAL.`);
+        setUnitValidationMessage({ text: 'Unidad no disponible (Ya utilizada)', type: 'error' });
+        return;
+      }
       setFormData(prev => ({
         ...prev,
         unitGroup: unitRecord.bloodGroup,
@@ -112,17 +167,6 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
     
     setSearchingUnit(false);
     setTimeout(() => setUnitValidationMessage(null), 3000);
-  };
-
-  const generatePredefinedInterpretation = (data: Partial<BloodTestRecord>) => {
-    const patientGroup = `${data.bloodGroup || ''} Rh${data.rh || ''}`;
-    const unitGroup = `${data.unitGroup || ''} Rh${data.unitRh || ''}`;
-    
-    if (data.result === 'Compatible') {
-      return `Se realizó prueba cruzada mayor manual entre el paciente ${data.patientName || '[Nombre]'} (Grupo ${patientGroup}) y la unidad ${data.unitId || '[Número]'} (Grupo ${unitGroup}). Tras las fases salina, albúmina y antiglobulina, no se observó aglutinación ni hemólisis. Resultado: Compatible para transfusión`;
-    } else {
-      return `Se realizó prueba cruzada mayor manual entre el paciente ${data.patientName || '[Nombre]'} (Grupo ${patientGroup}) y la unidad ${data.unitId || '[Número]'} (Grupo ${unitGroup}). Tras las fases salina, albúmina y antiglobulina, se observó aglutinación y/o hemólisis. Resultado: Incompatible para transfusión`;
-    }
   };
 
   const proceedToSave = (finalPatientName: string) => {
@@ -146,7 +190,6 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
       eps: '',
       age: '',
       gender: 'M',
-      zone: 'U',
       unitId: '',
       unitGroup: 'O',
       unitRh: '+',
@@ -165,6 +208,17 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validar que la unidad exista en recepción antes de permitir el registro
+    const unitExists = receivedUnits.some(
+      u => u.unitId === formData.unitId || u.qualitySeal === formData.qualitySeal
+    );
+
+    if (!unitExists) {
+      setAlertMessage('ERROR: No se puede registrar la prueba. La unidad no se encuentra en los registros de recepción. Por favor, valide la unidad primero.');
+      return;
+    }
+
     if (!formData.patientName || !formData.patientId || !formData.testDate) {
       setAlertMessage('Por favor complete los campos obligatorios.');
       return;
@@ -215,6 +269,37 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
       } else if (name === 'provider' && value === 'Hemocentro') {
         updated.qualitySeal = updated.unitId;
       }
+
+      // Logic for non-RBC hemoderivatives
+      if (name === 'requestedHemoderivative') {
+        if (value !== 'Globulos Rojos') {
+          updated.autocontrol = 'Unidad disponible';
+          updated.result = 'Unidad disponible';
+          updated.irregularAntibodies = 'NO APLICA';
+        } else {
+          updated.autocontrol = '0';
+          updated.result = 'Compatible';
+          updated.irregularAntibodies = 'NEGATIVO';
+        }
+        // Reset justification when hemoderivative changes
+        updated.justification = '';
+      }
+
+      // SIHEVI Logic
+      if (['siheviReport', 'siheviDescription', 'patientId', 'patientName'].includes(name)) {
+        const report = name === 'siheviReport' ? value : updated.siheviReport;
+        const desc = name === 'siheviDescription' ? value : updated.siheviDescription;
+        const pId = name === 'patientId' ? value : updated.patientId;
+        const pName = name === 'patientName' ? value : updated.patientName;
+
+        if (report === 'Sí') {
+          updated.siheviPredefinedText = `Paciente (${pId} y ${pName}) presenta reporte en SIHEVI mostrando lo siguiente: ${desc || ''}`;
+        } else if (report === 'No') {
+          updated.siheviPredefinedText = `El paciente (${pId} y ${pName}) no tiene reportes a la fecha de IH registrados ni RAT reportadas asociados`;
+        } else {
+          updated.siheviPredefinedText = '';
+        }
+      }
       
       return updated;
     });
@@ -224,7 +309,7 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
     <form onSubmit={handleSubmit} className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-8">
       <div className="flex items-center gap-2 border-b border-zinc-100 pb-4">
         <FileText className="text-red-600" size={24} />
-        <h2 className="text-xl font-bold text-zinc-900">Nueva Prueba de Compatibilidad</h2>
+        <h2 className="text-xl font-bold text-zinc-900">{initialData ? 'Editar Prueba de Compatibilidad' : 'Nueva Prueba de Compatibilidad'}</h2>
       </div>
 
       {/* Patient Info Section */}
@@ -260,7 +345,7 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <label className="text-xs font-medium text-zinc-700">EPS</label>
             <input type="text" name="eps" value={formData.eps} onChange={handleChange} className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm" placeholder="Ej: PARTICULAR" />
@@ -275,13 +360,6 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
               <option value="M">M</option>
               <option value="F">F</option>
               <option value="Otro">Otro</option>
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-700">Zona</label>
-            <select name="zone" value={formData.zone} onChange={handleChange} className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm">
-              <option value="U">U (Urbana)</option>
-              <option value="R">R (Rural)</option>
             </select>
           </div>
         </div>
@@ -300,9 +378,17 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
           </div>
           <div className="space-y-2">
             <label className="text-xs font-medium text-zinc-700">Resultado Final *</label>
-            <select name="result" value={formData.result} onChange={handleChange} required className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm font-bold ${formData.result === 'Compatible' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+            <select 
+              name="result" 
+              value={formData.result} 
+              onChange={handleChange} 
+              required 
+              disabled={formData.requestedHemoderivative !== 'Globulos Rojos'}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm font-bold ${formData.result === 'Compatible' ? 'bg-green-50 text-green-700 border-green-200' : formData.result === 'Unidad disponible' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-red-50 text-red-700 border-red-200'}`}
+            >
               <option value="Compatible">COMPATIBLE</option>
               <option value="Incompatible">INCOMPATIBLE</option>
+              <option value="Unidad disponible">UNIDAD DISPONIBLE</option>
             </select>
           </div>
         </div>
@@ -353,15 +439,16 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
             <select name="provider" value={formData.provider} onChange={handleChange} className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm">
               <option value="Hemolife">Hemolife</option>
               <option value="Hemocentro">Hemocentro</option>
-              <option value="Fueco">Fueco</option>
+              <option value="FUHECO">FUHECO</option>
             </select>
           </div>
           <div className="space-y-2">
             <label className="text-xs font-medium text-zinc-700">Hemoderivado Solicitado</label>
             <select name="requestedHemoderivative" value={formData.requestedHemoderivative} onChange={handleChange} className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm">
-              <option value="Globulos Rojos">Globulos Rojos</option>
+              <option value="Globulos Rojos">Glóbulos Rojos</option>
               <option value="Plasma Fresco Congelado">Plasma Fresco Congelado</option>
-              <option value="Plaquetas">Plaquetas</option>
+              <option value="Plaquetas (Estándar)">Plaquetas (Estándar)</option>
+              <option value="Plaquetas AFERESIS">Plaquetas AFERESIS</option>
             </select>
           </div>
           <div className="space-y-2">
@@ -374,20 +461,80 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
           </div>
         </div>
 
+        {/* Justification and SIHEVI Section */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-zinc-50">
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-zinc-700 uppercase">Justificación Clínica</label>
+            <select 
+              name="justification" 
+              value={formData.justification} 
+              onChange={handleChange} 
+              className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm"
+            >
+              <option value="">Seleccione una justificación...</option>
+              {formData.requestedHemoderivative && JUSTIFICATION_OPTIONS[formData.requestedHemoderivative]?.map((opt, idx) => (
+                <option key={idx} value={opt}>{opt}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-zinc-700 uppercase">¿Paciente presenta IH o RAT en SIHEVI?</label>
+            <select 
+              name="siheviReport" 
+              value={formData.siheviReport} 
+              onChange={handleChange} 
+              className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm"
+            >
+              <option value="No">No</option>
+              <option value="Sí">Sí</option>
+            </select>
+          </div>
+        </div>
+
+        {formData.siheviReport === 'Sí' && (
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-zinc-700">Descripción del Reporte SIHEVI</label>
+            <textarea
+              name="siheviDescription"
+              value={formData.siheviDescription}
+              onChange={handleChange}
+              className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm h-20 resize-none"
+              placeholder="Describa el reporte encontrado..."
+            />
+          </div>
+        )}
+
+        {formData.siheviPredefinedText && (
+          <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-100">
+            <p className="text-xs font-bold text-zinc-400 uppercase mb-2 tracking-wider">Vista Previa de Reporte</p>
+            <p className="text-sm text-zinc-600 italic leading-relaxed">
+              {formData.siheviPredefinedText}
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <label className="text-xs font-medium text-zinc-700">Número de Unidad</label>
-            <div className="flex gap-2">
-              <input type="text" name="unitId" value={formData.unitId} onChange={handleChange} className="flex-1 px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm font-mono" placeholder="Ej: 2331044178" />
+            <div className="flex gap-2 items-center">
+              <input 
+                type="text" 
+                name="unitId" 
+                value={formData.unitId} 
+                onChange={handleChange} 
+                className="flex-1 min-w-0 px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm font-mono" 
+                placeholder="Ej: 2331044178" 
+              />
               <button 
                 type="button" 
                 onClick={handleValidateUnit}
                 disabled={searchingUnit}
-                className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium disabled:opacity-50"
+                className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium disabled:opacity-50 h-[38px]"
                 title="Validar en Recepción"
               >
                 <Search size={14} className={searchingUnit ? 'animate-spin' : ''} />
-                {searchingUnit ? 'Buscando...' : 'Validar'}
+                {searchingUnit ? '...' : 'Validar'}
               </button>
             </div>
             {unitValidationMessage && (
@@ -416,12 +563,19 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
             </div>
             <div className="space-y-2">
               <label className="text-xs font-medium text-zinc-600">Autocontrol</label>
-              <select name="autocontrol" value={formData.autocontrol} onChange={handleChange} className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm">
+              <select 
+                name="autocontrol" 
+                value={formData.autocontrol} 
+                onChange={handleChange} 
+                disabled={formData.requestedHemoderivative !== 'Globulos Rojos'}
+                className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm"
+              >
                 <option value="0">0</option>
                 <option value="+">+</option>
                 <option value="++">++</option>
                 <option value="+++">+++</option>
                 <option value="++++">++++</option>
+                <option value="Unidad disponible">Unidad disponible</option>
               </select>
             </div>
             <div className="space-y-2">
@@ -439,7 +593,7 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
         </h3>
         
         <div className="p-4 bg-blue-50 text-blue-800 rounded-xl text-sm italic border border-blue-100">
-          {generatePredefinedInterpretation(formData)}
+          {generateInterpretation(formData)}
         </div>
       </div>
 
@@ -470,7 +624,7 @@ export const BloodTestForm: React.FC<BloodTestFormProps> = ({ onSave, userEmail,
           ) : (
             <Save size={20} />
           )}
-          {isSyncing ? 'Sincronizando...' : 'Guardar Registro'}
+          {isSyncing ? 'Sincronizando...' : initialData ? 'Actualizar Registro' : 'Guardar Registro'}
         </button>
       </div>
 

@@ -7,17 +7,18 @@ import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 interface DisposicionFormProps {
   onSubmit: (record: Omit<FinalDispositionRecord, 'id' | 'createdAt' | 'uid' | 'userEmail'>) => Promise<void>;
   isSubmitting: boolean;
+  initialData?: FinalDispositionRecord;
 }
 
-export const DisposicionForm: React.FC<DisposicionFormProps> = ({ onSubmit, isSubmitting }) => {
+export const DisposicionForm: React.FC<DisposicionFormProps> = ({ onSubmit, isSubmitting, initialData }) => {
   const [formData, setFormData] = useState({
-    unitId: '',
-    qualitySeal: '',
-    dispositionDate: new Date().toISOString().split('T')[0],
-    dispositionType: '' as FinalDispositionRecord['dispositionType'],
-    reason: '',
-    responsiblePerson: '',
-    observations: '',
+    unitId: initialData?.unitId || '',
+    qualitySeal: initialData?.qualitySeal || '',
+    dispositionDate: initialData?.dispositionDate || new Date().toISOString().split('T')[0],
+    dispositionType: initialData?.dispositionType || '' as FinalDispositionRecord['dispositionType'],
+    reason: initialData?.reason || '',
+    responsiblePerson: initialData?.responsiblePerson || '',
+    observations: initialData?.observations || '',
   });
 
   const [error, setError] = useState('');
@@ -169,7 +170,7 @@ export const DisposicionForm: React.FC<DisposicionFormProps> = ({ onSubmit, isSu
         ) : (
           <Save size={24} />
         )}
-        Registrar Disposición Final
+        {initialData ? 'Actualizar Disposición Final' : 'Registrar Disposición Final'}
       </button>
 
       {/* Alerta de Novedad */}

@@ -5,12 +5,11 @@ export interface BloodTestRecord {
   eps?: string;
   age?: string;
   gender?: string;
-  zone?: string;
   
   bloodGroup: 'A' | 'B' | 'AB' | 'O' | '';
   rh: '+' | '-' | '';
   testDate: string;
-  result: 'Compatible' | 'Incompatible' | '';
+  result: 'Compatible' | 'Incompatible' | 'Unidad disponible' | '';
   
   unitId?: string;
   unitGroup?: 'A' | 'B' | 'AB' | 'O' | '';
@@ -18,13 +17,18 @@ export interface BloodTestRecord {
   unitExpirationDate?: string;
   
   irregularAntibodies?: string;
-  autocontrol?: '0' | '+' | '++' | '+++' | '++++' | '';
+  autocontrol?: '0' | '+' | '++' | '+++' | '++++' | 'Unidad disponible' | '';
   temperature?: string;
   
-  provider?: 'Hemolife' | 'Hemocentro' | 'Fueco' | '';
-  requestedHemoderivative?: 'Globulos Rojos' | 'Plasma Fresco Congelado' | 'Plaquetas' | '';
+  provider?: 'Hemolife' | 'Hemocentro' | 'FUHECO' | '';
+  requestedHemoderivative?: 'Globulos Rojos' | 'Plasma Fresco Congelado' | 'Plaquetas (Estándar)' | 'Plaquetas AFERESIS' | '';
   requestType?: 'Reserva' | 'Transfusion' | 'Urgencia Vital' | '';
   qualitySeal?: string;
+  
+  justification?: string;
+  siheviReport?: 'Sí' | 'No' | '';
+  siheviDescription?: string;
+  siheviPredefinedText?: string;
   
   bacteriologist?: string;
   registryNumber?: string;
@@ -37,15 +41,17 @@ export interface BloodTestRecord {
   
   createdAt: string;
   uid?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface ReceivedUnitRecord {
   id?: string;
   receptionDate: string;
   receptionTime: string;
-  provider: 'Hemolife' | 'Hemocentro' | 'Fueco' | '';
+  provider: 'Hemolife' | 'Hemocentro' | 'FUHECO' | '';
   
-  hemoderivativeType: 'Globulos Rojos' | 'Plasma Fresco Congelado' | 'Plaquetas' | '';
+  hemoderivativeType: 'Globulos Rojos' | 'Plasma Fresco Congelado' | 'Plaquetas (Estándar)' | 'Plaquetas AFERESIS' | '';
   unitId: string;
   qualitySeal: string;
   bloodGroup: 'A' | 'B' | 'AB' | 'O' | '';
@@ -69,6 +75,8 @@ export interface ReceivedUnitRecord {
   userEmail?: string;
   createdAt: string;
   uid?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface TransfusionUseRecord {
@@ -91,21 +99,17 @@ export interface TransfusionUseRecord {
   prescriptionFormat: 'Sí' | 'No' | '';
   informedConsent: 'Sí' | 'No' | '';
   adminChecklist: 'Sí' | 'No' | '';
+  nursingNote: 'Sí' | 'No' | '';
   adverseReaction: 'Sí' | 'No' | '';
   safetyEvent: string;
   
-  // Keep vital signs as they are useful for the clinical context
-  preVitalSigns?: { ta: string; fc: string; fr: string; temp: string };
-  duringVitalSigns?: { ta: string; fc: string; fr: string; temp: string };
-  postVitalSigns?: { ta: string; fc: string; fr: string; temp: string };
-  
   reactionDescription?: string;
-  responsibleDoctor?: string;
-  responsibleNurse?: string;
   observations?: string;
   userEmail?: string;
   createdAt: string;
   uid?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface FinalDispositionRecord {
@@ -120,4 +124,6 @@ export interface FinalDispositionRecord {
   userEmail?: string;
   createdAt: string;
   uid?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
