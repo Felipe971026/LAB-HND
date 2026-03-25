@@ -1,0 +1,5 @@
+{
+  "name": "HemoMatch - Gestión de Hemoderivados UCI Honda",
+  "description": "Sistema para el registro y seguimiento de pruebas cruzadas de hemoderivados en UCI Honda, con historial y exportación a PDF.",
+  "requestFramePermissions": []
+}
